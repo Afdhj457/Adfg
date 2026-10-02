@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>文件管理器 · 简约版</title>
-  <!-- Font Awesome for icons (optional but adds visual appeal) -->
+  <title>文件管理器 · 音效版</title>
+  <!-- Font Awesome for icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
   <style>
     * {
@@ -182,7 +182,6 @@
       transition: all 0.2s;
     }
 
-    /* custom scroll */
     .file-list::-webkit-scrollbar {
       width: 5px;
     }
@@ -389,6 +388,31 @@
       transition: width 0.3s;
     }
 
+    /* 音效开关 */
+    .sound-toggle {
+      background: white;
+      border: none;
+      width: 2.6rem;
+      height: 2.6rem;
+      border-radius: 1.2rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #2e577a;
+      font-size: 1.2rem;
+      cursor: pointer;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.02), 0 0 0 1px rgba(0, 0, 0, 0.02);
+      transition: 0.18s;
+    }
+
+    .sound-toggle:hover {
+      background: #eff5fb;
+    }
+
+    .sound-toggle.muted {
+      color: #b0c6da;
+    }
+
     @media (max-width: 750px) {
       .list-header {
         grid-template-columns: 1fr 100px 80px;
@@ -494,7 +518,7 @@
     <div class="title-section">
       <i class="fas fa-folder-open"></i>
       <h1>文件管理器</h1>
-      <span class="badge">本地模拟</span>
+      <span class="badge">音效版</span>
     </div>
     <div class="search-area">
       <i class="fas fa-search"></i>
@@ -503,6 +527,8 @@
     <div class="action-buttons">
       <button class="icon-btn" id="sortBtn" title="按名称排序"><i class="fas fa-arrow-down-a-z"></i></button>
       <button class="icon-btn" id="refreshBtn" title="重置列表"><i class="fas fa-sync-alt"></i></button>
+      <!-- 音效开关按钮 -->
+      <button class="sound-toggle" id="soundToggle" title="开启/关闭音效"><i class="fas fa-volume-up"></i></button>
     </div>
   </div>
 
@@ -547,6 +573,123 @@
 
 <script>
   (function() {
+    // ---------- 音效模块 ----------
+    // 使用 Web Audio API 生成短促提示音，无需外部文件
+    class SoundEffects {
+      constructor() {
+        this.audioCtx = null;
+        this.enabled = true;
+        // 初始化 AudioContext（需要用户交互后才能启动，但首次点击时创建即可）
+      }
+
+      // 懒加载 AudioContext（浏览器要求用户交互后创建）
+      initContext() {
+        if (!this.audioCtx) {
+          try {
+            this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          } catch (e) {
+            console.warn('Web Audio API 不支持，音效不可用');
+            this.enabled = false;
+          }
+        }
+        // 如果 context 处于 suspended 状态，恢复它（用户手势触发）
+        if (this.audioCtx && this.audioCtx.state === 'suspended') {
+          this.audioCtx.resume();
+        }
+      }
+
+      // 播放音效：type = 'click' | 'success' | 'delete' | 'add' | 'toggle' | 'sort'
+      play(type) {
+        if (!this.enabled) return;
+        this.initContext();
+        if (!this.audioCtx) return;
+
+        const now = this.audioCtx.currentTime;
+        const osc = this.audioCtx.createOscillator();
+        const gainNode = this.audioCtx.createGain();
+
+        osc.connect(gainNode);
+        gainNode.connect(this.audioCtx.destination);
+
+        // 根据类型设置不同的音效参数
+        let frequency = 600;
+        let duration = 0.08;
+        let volume = 0.15;
+        let typeWave = 'sine';
+
+        switch (type) {
+          case 'click':      // 点击/搜索等轻交互
+            frequency = 800;
+            duration = 0.05;
+            volume = 0.08;
+            typeWave = 'sine';
+            break;
+          case 'success':    // 操作成功（添加、重命名、重置等）
+            frequency = 1046.5; // C6
+            duration = 0.12;
+            volume = 0.12;
+            typeWave = 'triangle';
+            break;
+          case 'delete':     // 删除（低音提示）
+            frequency = 320;
+            duration = 0.15;
+            volume = 0.15;
+            typeWave = 'sawtooth';
+            break;
+          case 'add':        // 添加文件
+            frequency = 880;  // A5
+            duration = 0.1;
+            volume = 0.12;
+            typeWave = 'sine';
+            break;
+          case 'toggle':     // 切换排序/音效开关
+            frequency = 640;
+            duration = 0.06;
+            volume = 0.1;
+            typeWave = 'square';
+            break;
+          case 'sort':       // 排序
+            frequency = 720;
+            duration = 0.07;
+            volume = 0.1;
+            typeWave = 'sine';
+            break;
+          default:
+            frequency = 700;
+            duration = 0.06;
+            volume = 0.1;
+        }
+
+        osc.type = typeWave;
+        osc.frequency.setValueAtTime(frequency, now);
+
+        // 对某些音效添加轻微频率滑动，更生动
+        if (type === 'success' || type === 'add') {
+          osc.frequency.exponentialRampToValueAtTime(frequency * 1.2, now + duration * 0.8);
+        } else if (type === 'delete') {
+          osc.frequency.exponentialRampToValueAtTime(frequency * 0.8, now + duration);
+        }
+
+        gainNode.gain.setValueAtTime(volume, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+        osc.start(now);
+        osc.stop(now + duration);
+      }
+
+      // 切换静音
+      toggleMute() {
+        this.enabled = !this.enabled;
+        if (this.enabled) {
+          this.initContext(); // 确保恢复音频上下文
+          this.play('toggle'); // 开启时给个反馈音
+        }
+        return this.enabled;
+      }
+    }
+
+    const sound = new SoundEffects();
+
     // ---------- 初始数据 ----------
     const initialFiles = [
       { id: '1', name: '项目计划书.docx', type: 'doc', size: '2.4 MB', modified: '2025-02-18' },
@@ -571,7 +714,7 @@
       default: 'fa-file'
     };
 
-    // 颜色映射 (用于图标微调)
+    // 颜色映射
     const colorMap = {
       folder: '#f1c40f',
       doc: '#2b5797',
@@ -586,7 +729,7 @@
     // 全局状态
     let files = [...initialFiles];
     let currentSearch = '';
-    let sortAsc = true;  // 按名称升序
+    let sortAsc = true;
 
     // DOM 元素
     const fileListContainer = document.getElementById('fileListContainer');
@@ -595,6 +738,7 @@
     const sortBtn = document.getElementById('sortBtn');
     const refreshBtn = document.getElementById('refreshBtn');
     const addSampleBtn = document.getElementById('addSampleBtn');
+    const soundToggle = document.getElementById('soundToggle');
 
     // ---------- 辅助: 获取图标类 ----------
     function getIconClass(type) {
@@ -603,13 +747,10 @@
 
     // ---------- 渲染文件列表 ----------
     function renderFileList() {
-      // 过滤：基于搜索词
       let filtered = files.filter(file => 
         file.name.toLowerCase().includes(currentSearch.toLowerCase())
       );
 
-      // 排序: 按名称 (文件夹优先? 为了简洁，不特别区分文件夹，按名称排序)
-      // 如果希望文件夹始终在前，放开注释，但这里保持简单按名称
       filtered.sort((a, b) => {
         const nameA = a.name.toLowerCase();
         const nameB = b.name.toLowerCase();
@@ -617,10 +758,8 @@
         else return nameB.localeCompare(nameA);
       });
 
-      // 更新计数
       itemsCountSpan.textContent = `${filtered.length} 个项目`;
 
-      // 如果没有任何项目
       if (filtered.length === 0) {
         fileListContainer.innerHTML = `
           <div class="empty-state">
@@ -632,24 +771,14 @@
         return;
       }
 
-      // 构建 HTML
       let html = '';
       filtered.forEach(file => {
         const iconClass = getIconClass(file.type);
-        // 对文件夹和文件的图标颜色做简单区分
         const iconColor = colorMap[file.type] || colorMap.default;
-        // 文件夹图标实心，文件图标用常规样式
-        const iconStyle = file.type === 'folder' ? 'solid' : 'regular'; // 实际fa的folder是solid，用fas即可
-        
-        // 为了美观，文件夹用fas, 文件大部分用far? 但为了统一视觉, 统一用fas / far 混合
-        // 简单处理: 文件夹使用实心(fas), 文件部分用far但有些文件图标只有实心, 所以统一用fas, 但视觉也不错
-        // 更细腻: 文件夹使用fas, 文件使用far 但far有些图标不存在。所以统一用fas, 通过颜色区分
-        const finalIcon = file.type === 'folder' ? 'fas' : 'fas';  // 统一solid
-
         html += `
           <div class="file-item" data-id="${file.id}">
             <div class="file-info">
-              <i class="${finalIcon} ${iconClass} file-icon" style="color: ${iconColor};"></i>
+              <i class="fas ${iconClass} file-icon" style="color: ${iconColor};"></i>
               <span class="file-name" title="${file.name}">${file.name}</span>
             </div>
             <div class="file-meta">${file.modified}</div>
@@ -663,12 +792,9 @@
       });
 
       fileListContainer.innerHTML = html;
-
-      // 绑定删除/重命名事件 (事件委托也行，但这里直接在容器上委托)
-      // 已经在容器上使用事件委托，但需要重新绑定? 使用容器监听即可，无需每次重新绑定。
     }
 
-    // ---------- 事件委托: 处理文件操作 (删除/重命名) ----------
+    // ---------- 事件委托: 处理文件操作 ----------
     fileListContainer.addEventListener('click', (e) => {
       const actionBtn = e.target.closest('.action-btn');
       if (!actionBtn) return;
@@ -679,34 +805,40 @@
       if (!file) return;
 
       if (action === 'delete') {
-        // 删除文件 (带一点确认，但完全模拟，可以直接删除)
         if (confirm(`确定要删除 “${file.name}” 吗？`)) {
+          sound.play('delete'); // 删除音效
           files = files.filter(f => f.id !== id);
-          renderFileList();  // 重新渲染
+          renderFileList();
         }
       } else if (action === 'rename') {
         const newName = prompt('输入新的文件名称:', file.name);
         if (newName && newName.trim() !== '') {
           file.name = newName.trim();
-          // 可选修改修改日期
-          // 更新修改日期为今天
           const today = new Date().toISOString().split('T')[0];
           file.modified = today;
+          sound.play('success'); // 重命名成功音效
           renderFileList();
         }
       }
     });
 
-    // ---------- 搜索功能 (实时) ----------
+    // ---------- 搜索功能 (带防抖，防止音效过密) ----------
+    let searchTimeout;
     searchInput.addEventListener('input', (e) => {
       currentSearch = e.target.value;
       renderFileList();
+      // 轻量音效，只在停止输入后播放，避免频繁噪音
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        if (currentSearch.trim() !== '') {
+          sound.play('click');
+        }
+      }, 200);
     });
 
     // ---------- 排序切换 ----------
     sortBtn.addEventListener('click', () => {
       sortAsc = !sortAsc;
-      // 更新按钮图标
       const icon = sortBtn.querySelector('i');
       if (sortAsc) {
         icon.className = 'fas fa-arrow-down-a-z';
@@ -715,18 +847,16 @@
         icon.className = 'fas fa-arrow-up-a-z';
         sortBtn.title = '当前降序，点击升序';
       }
+      sound.play('sort'); // 排序音效
       renderFileList();
     });
 
-    // ---------- 重置/刷新 (恢复初始数据但保留搜索? 为了体验，清空搜索并重置排序) ----------
+    // ---------- 重置/刷新 ----------
     refreshBtn.addEventListener('click', () => {
-      // 恢复原始数据 (但为了避免id冲突，重新生成id)
-      // 最简单：重置为初始数据的深拷贝
+      sound.play('success'); // 重置音效
       files = initialFiles.map(f => ({...f}));
-      // 重置搜索
       currentSearch = '';
       searchInput.value = '';
-      // 重置排序为升序
       sortAsc = true;
       const icon = sortBtn.querySelector('i');
       icon.className = 'fas fa-arrow-down-a-z';
@@ -734,7 +864,7 @@
       renderFileList();
     });
 
-    // ---------- 添加示例文件 (随机生成) ----------
+    // ---------- 添加示例文件 ----------
     addSampleBtn.addEventListener('click', () => {
       const sampleNames = [
         '会议记录', '季度报告', '产品原型', '数据备份', '营销方案',
@@ -743,15 +873,12 @@
       const types = ['doc', 'excel', 'ppt', 'pdf', 'image', 'folder', 'archive'];
       const randomName = sampleNames[Math.floor(Math.random() * sampleNames.length)];
       const randomType = types[Math.floor(Math.random() * types.length)];
-      // 生成随机大小 (1-30MB)
       const sizeMB = (Math.random() * 29 + 1).toFixed(1);
       let sizeStr = sizeMB + ' MB';
       if (randomType === 'folder') sizeStr = '--';
-      // 随机日期 2025-02-01 到 2025-02-28
       const day = String(Math.floor(Math.random() * 28) + 1).padStart(2, '0');
       const modified = `2025-02-${day}`;
       
-      // 决定扩展名
       let ext = '';
       switch(randomType) {
         case 'doc': ext = '.docx'; break;
@@ -772,19 +899,44 @@
       };
 
       files.push(newFile);
-      // 如果当前有搜索词并且新文件不符合，可能看不到，但计数会显示，可以清空搜索或就这样
-      // 为了让用户看到，如果搜索词存在且不匹配，清空搜索
       if (currentSearch && !newFile.name.toLowerCase().includes(currentSearch.toLowerCase())) {
         currentSearch = '';
         searchInput.value = '';
       }
+      sound.play('add'); // 添加音效
       renderFileList();
+    });
+
+    // ---------- 音效开关 ----------
+    soundToggle.addEventListener('click', () => {
+      const enabled = sound.toggleMute();
+      if (enabled) {
+        soundToggle.classList.remove('muted');
+        soundToggle.innerHTML = '<i class="fas fa-volume-up"></i>';
+        soundToggle.title = '音效已开启';
+      } else {
+        soundToggle.classList.add('muted');
+        soundToggle.innerHTML = '<i class="fas fa-volume-mute"></i>';
+        soundToggle.title = '音效已关闭';
+      }
     });
 
     // ---------- 初始化渲染 ----------
     renderFileList();
 
-    // 额外的初始排序图标状态
+    // 首次用户点击时初始化 AudioContext (满足浏览器自动播放策略)
+    document.body.addEventListener('click', () => {
+      sound.initContext();
+    }, { once: true });
+
+    // 额外：任何按钮点击都尝试恢复context
+    document.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        sound.initContext();
+      });
+    });
+
+    // 初始排序图标状态
     sortBtn.title = '当前升序，点击降序';
   })();
 </script>
